@@ -47,6 +47,10 @@ while true; do
             count=$2
             shift 2
             ;;
+        --limit|-l)
+            limit=$2
+            shift 2
+            ;;
         --)
             shift
             break
@@ -78,6 +82,28 @@ count=$(printf "%d" ${count})
 
 add-nodes --count ${count} \
     --software-profile ${software_profile} \
-    --hardware-profile ${hardware_profile}
+    --hardware-profile ${hardware_profile} | tee /tmp/add-nodes.out
+
+if [ ! -z "$limit" ]; then
+    request_id=$(cat /tmp/add-nodes.out | awk -F[ '{print $2}' | awk -F] '{print $1}')
+    echo "Request id: $request_id"
+    while get-node-requests -r $request_id | fgrep pending ; do
+	echo "Waiting for nodes become available"
+	sleep 1
+    done
+    nodes=($(get-node-requests -r $request_id | tail -n +2))
+    paths=($limit)
+    nodes_cnt=${#nodes[@]}
+    paths_cnt=${#paths[@]}
+
+    echo "nodes=$nodes"
+    echo "paths=$paths"
+
+#   loop_cnt=$((paths_cnt/nodes_cnt ))
+#   for path in limit; do
+#	rsync ...
+#   done
+
+fi
 
 exit 0

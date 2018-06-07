@@ -17,8 +17,9 @@
 
 <rule applicationName="simple_burst" name="basicBurst">
     <xPathVariable name="__neededNodes__" xPath="number(resourceData[@queue='burst.q']/neededNodes)"/>
+    <xPathVariable name="__paths__" xPath="number(resourceData[@queue='burst.q']/paths)"/>
     <applicationMonitor type="receive">
-    <actionCommand>{{ spe_kitdir }}/examples/simple_burst/activateNodes.sh --software-profile execd-burst --hardware-profile execd-burst --count __neededNodes__</actionCommand>
+    <actionCommand>{{ spe_kitdir }}/examples/simple_burst/activateNodes.sh --software-profile execd-burst --hardware-profile execd-burst --limit __paths__ --count __neededNodes__</actionCommand>
     </applicationMonitor>
     <condition metricXPath="__neededNodes__" evaluationOperator=">" triggerValue="10">
         <description>Needed nodes must be greater than 10</description>

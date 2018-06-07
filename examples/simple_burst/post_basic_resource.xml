@@ -17,7 +17,7 @@
 
 <rule applicationName="simple_burst" name="burstPoller">
   <applicationMonitor type="poll" pollPeriod="300">
-    <actionCommand>{{ spe_kitdir }}/examples/simple_burst/get-resource-info --queue-name burst.q --software-profile execd-burst --cell-dir /opt/uge-8.5.4/default --output /tmp/pending_s2basic &amp;&amp; /opt/tortuga/bin/post-application-data --app-name=simple_burst --data-file=/tmp/pending_s2basic</actionCommand>
+    <actionCommand>{{ spe_kitdir }}/examples/simple_burst/get-resource-info --queue-name burst.q --software-profile execd-burst --cell-dir /opt/uge-8.5.4/default --path lpath --output /tmp/pending_s2basic &amp;&amp; /opt/tortuga/bin/post-application-data --app-name=simple_burst --data-file=/tmp/pending_s2basic</actionCommand>
     <description>Pending Basic Job Monitor</description>
   </applicationMonitor>
   <description>Return info on pending pending jobs</description>

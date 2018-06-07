@@ -24,20 +24,30 @@ import xml.etree.cElementTree
 from optparse import OptionParser
 
 
-def get_job_slots(xmldom):
+def get_job_slots(xmldom, path_complex):
+    print("get_job_slots: xmldom=%s" % xmldom)
+
+    # Find <JB_ja_structure> element
+    path = None
+    el_path_root = xmldom.find(".//djob_info/element/JB_hard_resource_list/element/[CE_name='%s']" % path_complex)
+    print("get_job_slots: type=%s" % type(el_path_root))
+    if el_path_root is not None:
+        el_path = el_path_root.find('CE_stringval')
+        path = el_path.text
+        print("get_job_slots: path=%s" % path)
+
     # Check for parallel environment job
     pe_range = xmldom.find('.//djob_info/element/JB_pe_range')
 
     if pe_range is not None:
         # Process parallel environment job
-        return int(pe_range.find('element/RN_max').text)
+        return int(pe_range.find('element/RN_max').text), path
 
     # Find <JB_ja_structure> element
-    ja_structure = xmldom.find(
-        './/djob_info/element/JB_ja_structure')
+    ja_structure = xmldom.find('.//djob_info/element/JB_ja_structure')
 
     if ja_structure is None:
-        return None
+        return None, None
 
     element = ja_structure.find('element')
     if element is None:
@@ -45,22 +55,23 @@ def get_job_slots(xmldom):
 
     if element is None:
         # Error parsing XML
-        return None
+        return None, None
 
     rn_min = float(element.find('RN_min').text)
     rn_max = float(element.find('RN_max').text)
     rn_step = float(element.find('RN_step').text)
 
     if rn_min == rn_max and rn_step == 1:
-        return int(rn_max)
+        return int(rn_max), path
 
-    return 1 + int(math.ceil(rn_max - rn_min) / rn_step)
+    return 1 + int(math.ceil(rn_max - rn_min) / rn_step), path
 
 
 def qstat_subprocess(cell_dir, *args):
+#    print("args=%s" % args)
     cmd = 'source %s/common/settings.sh && qstat ' % (cell_dir) + \
         ' '.join(args)
-
+    print("cmd=%s" % cmd)
     p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, bufsize=1)
 
     return p
@@ -83,7 +94,7 @@ def iter_pending_jobs(cell_dir, queue_name):
         if not buf:
             break
 
-        yield buf.rstrip()
+        yield int(buf.rstrip())
 
     retval = p.wait()
     if retval != 0:
@@ -91,6 +102,7 @@ def iter_pending_jobs(cell_dir, queue_name):
 
 
 def get_job_xmldom(cell_dir, job_id):
+    print("get_job_xmldom: job_id=%s" % job_id)
     p = qstat_subprocess(cell_dir, '-xml', '-j', job_id)
 
     try:
@@ -107,6 +119,7 @@ def get_job_xmldom(cell_dir, job_id):
 
 
 def get_queue_running_job_count(cell_dir, queue_name):
+    print("get_queue_running_job_count")
     p = qstat_subprocess(cell_dir,
                          '-f -q %s -u "*" | grep " r " | wc -l' % (queue_name))
 
@@ -148,7 +161,7 @@ NOTE: this is an internal use application (used by Simply Policy Engine)""")
                       ' (mandatory)')
 
     parser.add_option('--queue-name', help='Queue used for bursting'
-                      '  (mandatory)')
+                      ' (mandatory)')
 
     parser.add_option('--cell-dir',
                       help='UGE cell directory ($SGE_ROOT/$SGE_CELL)'
@@ -157,6 +170,9 @@ NOTE: this is an internal use application (used by Simply Policy Engine)""")
     parser.add_option('--slots-per-host',
                       help='Slots available per host (default: %default)',
                       default=1, type='int')
+
+    parser.add_option('--path',
+                      help='path complex')
 
     parser.add_option('--output',
                       help='Output filename of generated XML')
@@ -169,28 +185,42 @@ NOTE: this is an internal use application (used by Simply Policy Engine)""")
         parser.error('--software-profile, --queue-name, and --cell-dir'
                      ' arguments are required')
 
+    path_complex = options.path if options.path is not None else "path"
+    print("path_complex=%s" % path_complex)
+
     pendingBigJobs = 0
     slots = 0
-
+    paths = []
     # Iterate over all jobs
     for job_id in iter_pending_jobs(options.cell_dir, options.queue_name):
-        job_slots = get_job_slots(get_job_xmldom(options.cell_dir, job_id))
+        print("iter job: %s" % job_id)
+        jid = str(job_id)
+        print("iter j: %s" % jid)
+        job_slots, path = get_job_slots(get_job_xmldom(options.cell_dir, str(job_id)), path_complex)
+        print("job_slots=%s" % job_slots)
+        print("path=%s" % path)
 
         if job_slots is None:
             # Error parsing XML for job
             continue
 
         pendingBigJobs += 1
-
         slots += job_slots
+        if path is not None:
+            paths.append(path)
+
+    print("paths=%s" % paths)
 
     queueRunningJobs = get_queue_running_job_count(
         options.cell_dir, options.queue_name)
+    print("queueRunningJobs=%s" % queueRunningJobs)
 
     totalJobs = pendingBigJobs + queueRunningJobs
+    print("totalJobs=%s" % totalJobs)
 
     nodesInQueue = get_software_profile_node_count(
         options.software_profile)
+    print("nodesInQueue=%s" % nodesInQueue)
 
     # Round 'needed slots' up to next multiple (slots_per_host)
 
@@ -200,35 +230,61 @@ NOTE: this is an internal use application (used by Simply Policy Engine)""")
     needed_slots = math.ceil(
         float(slots) / float(options.slots_per_host)) * \
         float(options.slots_per_host)
+    print("needed_slots=%s" % needed_slots)
 
     available_slots = int(nodesInQueue * options.slots_per_host)
+    print("available_slots=%s" % available_slots)
 
     neededNodes = (needed_slots - available_slots) / options.slots_per_host
+    print("neededNodes=%s" % neededNodes)
 
     extraNodes = (available_slots - needed_slots) / options.slots_per_host
-
+    print("extraNodes=%s" % extraNodes)
     # Output XML
 
     a = xml.etree.cElementTree.Element('resourceData')
+    print("a=%s" % a)
     a.attrib['queue'] = options.queue_name
+    print("queue=%s"%options.queue_name)
 
     pendingJobsElement = xml.etree.cElementTree.SubElement(a, 'pendingJobs')
     pendingJobsElement.text = '%d' % (pendingBigJobs)
+    print("1")
     queueRunningJobsElement = xml.etree.cElementTree.SubElement(
         a, 'queueRunningJobs')
     queueRunningJobsElement.text = '%d' % (queueRunningJobs)
+    print("2")
     totalJobsElement = xml.etree.cElementTree.SubElement(a, 'totalJobs')
     totalJobsElement.text = '%d' % (totalJobs)
+    print("3")
     nodesInQueueElement = xml.etree.cElementTree.SubElement(a, 'nodesInQueue')
     nodesInQueueElement.text = '%d' % (nodesInQueue)
+    print("4")
     neededNodesElement = xml.etree.cElementTree.SubElement(a, 'neededNodes')
     neededNodesElement.text = '%d' % (neededNodes)
     extraNodesElement = xml.etree.cElementTree.SubElement(a, 'extraNodes')
     extraNodesElement.text = '%d' % (extraNodes)
 
-    xml.etree.cElementTree.ElementTree(a).write(
-        options.output if options.output else sys.stdout,
-        encoding='utf-8')
+    if len(paths) > 0:
+        pathsElement = xml.etree.cElementTree.SubElement(a, 'paths')
+        pathsElement.text = ':'.join(paths)
+
+    print("5")
+    print("a=%s" % xml.etree.ElementTree.tostring(a).decode('utf-8'))
+    strout = xml.etree.ElementTree.tostring(a).decode('utf-8')
+    if options.output:
+        o = open(options.output, 'w')
+    else:
+        o = sys.stdout
+    try:
+        o.write(strout)
+    finally:
+        if o is not None:
+            o.close()
+#    xml.etree.cElementTree.ElementTree(a).write(
+#    xml.etree.cElementTree.ElementTree(xml.etree.ElementTree.tostring(a).decode('utf-8')).write(
+#        options.output if options.output else sys.stdout,
+#        encoding='utf-8')
 
 
 if __name__ == '__main__':
